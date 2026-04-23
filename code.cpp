@@ -9,7 +9,9 @@ const int segPins[2][7] = {{13, 12, 11, 10, 9, 8, 7},
 const int SENSOR_PIN1 = A0;
 const int SENSOR_PIN2 = A1;
 
-const int SENSOR_THRESHOLD = 512; // Adjust based on your sensor (0-1023)
+const int SENSOR_THRESHOLD = 5 * 58; // Adjust based on your sensor (0-1023)
+const int TARGET_DISTANCE_CM = 5;
+const int DISTANCE_TOLERANCE_CM = 1;
 const int DEBOUNCE_DELAY = 300;   // ms to ignore repeated triggers
 
 // Digit patterns for 0-9 (segments: a, b, c, d, e, f, g)
@@ -71,9 +73,18 @@ void setup()
 void loop() {
   int sensor1Value = analogRead(SENSOR_PIN1);
   bool sensor1Triggered = sensor1Value > SENSOR_THRESHOLD;
-  
-  int sensor2Value = analogRead(SENSOR_PIN2);
-  bool sensor2Triggered = sensor2Value > SENSOR_THRESHOLD;
+
+  pinMode(SENSOR_PIN2, OUTPUT);
+  digitalWrite(SENSOR_PIN2, LOW);
+  delayMicroseconds(2);
+  digitalWrite(SENSOR_PIN2, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(SENSOR_PIN2, LOW);
+  pinMode(SENSOR_PIN2, INPUT);
+  unsigned long sensor2Duration = pulseIn(SENSOR_PIN2, HIGH, 30000UL);
+  int sensor2Distance = sensor2Duration > 0 ? (int)(sensor2Duration / 58UL) : -1;
+  bool sensor2Triggered = sensor2Distance >= 0 &&
+                          abs(sensor2Distance - TARGET_DISTANCE_CM) <= DISTANCE_TOLERANCE_CM;
   
   unsigned long now = millis();
 
@@ -95,6 +106,5 @@ void loop() {
     Serial.println(counter2);
     displayDigit(counter2, 1);
   }
-
   lastSensor2State = sensor2Triggered;
 }
