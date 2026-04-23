@@ -46,6 +46,21 @@ void displayDigit(int n, int disp)
   }
 }
 
+int measureDistance() 
+{
+    pinMode(SENSOR_PIN2, OUTPUT);
+    digitalWrite(SENSOR_PIN2, LOW);
+    delayMicroseconds(2);
+    digitalWrite(SENSOR_PIN2, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(SENSOR_PIN2, LOW);
+    pinMode(SENSOR_PIN2, INPUT);
+    unsigned long sensor2Duration = pulseIn(SENSOR_PIN2, HIGH, 30000UL);
+    int sensor2Distance = sensor2Duration > 0 ? (int)(sensor2Duration / 58UL) : -1;
+
+    return sensor2Distance;
+}
+
 void setup() 
 {
   // Setup display pins
@@ -74,17 +89,9 @@ void loop() {
   int sensor1Value = analogRead(SENSOR_PIN1);
   bool sensor1Triggered = sensor1Value > SENSOR_THRESHOLD;
 
-  pinMode(SENSOR_PIN2, OUTPUT);
-  digitalWrite(SENSOR_PIN2, LOW);
-  delayMicroseconds(2);
-  digitalWrite(SENSOR_PIN2, HIGH);
-  delayMicroseconds(5);
-  digitalWrite(SENSOR_PIN2, LOW);
-  pinMode(SENSOR_PIN2, INPUT);
-  unsigned long sensor2Duration = pulseIn(SENSOR_PIN2, HIGH, 30000UL);
-  int sensor2Distance = sensor2Duration > 0 ? (int)(sensor2Duration / 58UL) : -1;
-  bool sensor2Triggered = sensor2Distance >= 0 &&
-                          abs(sensor2Distance - TARGET_DISTANCE_CM) <= DISTANCE_TOLERANCE_CM;
+  
+  int sensor2Distance = measureDistance();
+  bool sensor2Triggered = sensor2Distance >= 0 && abs(sensor2Distance - TARGET_DISTANCE_CM) <= DISTANCE_TOLERANCE_CM;
   
   unsigned long now = millis();
 
