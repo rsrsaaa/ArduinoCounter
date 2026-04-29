@@ -21,7 +21,8 @@ const int DEBOUNCE_DELAY = 300;   // ms to ignore repeated triggers
 
 // Digit patterns for 0-9 (segments: a, b, c, d, e, f, g)
 // 1 = segment ON, 0 = segment OFF
-const byte digits[10][7] = {
+const byte digits[10][7] = 
+{
   {1,1,1,1,1,1,0}, // 0
   {0,1,1,0,0,0,0}, // 1
   {1,1,0,1,1,0,1}, // 2
@@ -65,7 +66,8 @@ int measureDistance(int trigPin, int echoPin)
   // Read echo pulse duration (timeout 30 ms ≈ ~5 m max range)
   unsigned long duration = pulseIn(echoPin, HIGH, 30000UL);
 
-  if (duration == 0) {
+  if (duration == 0) 
+  {
     return -1; // No echo received
   }
 
@@ -101,7 +103,8 @@ void setup()
   Serial.println("Counter 2 ready.");
 }
 
-void loop() {
+void loop() 
+{
   // Measure both sensors
   int distance1 = measureDistance(TRIG_PIN1, ECHO_PIN1);
   int distance2 = measureDistance(TRIG_PIN2, ECHO_PIN2);
@@ -113,7 +116,8 @@ void loop() {
   unsigned long now = millis();
 
   // Sensor 1: detect rising edge + debounce
-  if (sensor1Triggered && !lastSensor1State && (now - lastTriggerTime1 > DEBOUNCE_DELAY)) {
+  if (sensor1Triggered && !lastSensor1State && (now - lastTriggerTime1 > DEBOUNCE_DELAY)) 
+  {
     counter1++;
     lastTriggerTime1 = now;
     Serial.print("Counter 1: ");
@@ -123,7 +127,8 @@ void loop() {
   lastSensor1State = sensor1Triggered;
 
   // Sensor 2: detect rising edge + debounce
-  if (sensor2Triggered && !lastSensor2State && (now - lastTriggerTime2 > DEBOUNCE_DELAY)) {
+  if (sensor2Triggered && !lastSensor2State && (now - lastTriggerTime2 > DEBOUNCE_DELAY)) 
+  {
     counter2++;
     lastTriggerTime2 = now;
     Serial.print("Counter 2: ");
