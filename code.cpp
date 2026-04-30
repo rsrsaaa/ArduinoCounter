@@ -27,7 +27,7 @@ const int TRIG_PIN2 = 10;
 const int ECHO_PIN2 = 11;
 
 // --- Sensor Configuration ---
-const int TARGET_DISTANCE_CM = 5;
+const int TARGET_DISTANCE_CM = 20;
 const int DISTANCE_TOLERANCE_CM = 1;
 const int DEBOUNCE_DELAY = 100; // ms to ignore repeated triggers
 
