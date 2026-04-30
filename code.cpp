@@ -34,6 +34,8 @@ const int DEBOUNCE_DELAY = 100; // ms to ignore repeated triggers
 // --- Counter Configuration ---
 const int START_VALUE = 99; // Initial particle count (tweak per experiment)
 const int MIN_VALUE = 1;    // Floor to avoid division by zero
+const int STEP_1 = 6;
+const int STEP_2 = 9;
 
 // --- Nernst Constants (tweak per particle type) ---
 const float NERNST_NUMERATOR = 59.2; // 0.0592 V converted to mV
@@ -164,7 +166,7 @@ void loop()
   {
     if (counter1 > MIN_VALUE)
     {
-      counter1--;
+      counter1 = counter1 - STEP_1;
       changed = true;
       lastTriggerTime1 = now;
       Serial.print("Counter 1: ");
@@ -180,7 +182,7 @@ void loop()
   {
     if (counter2 > MIN_VALUE)
     {
-      counter2--;
+      counter2 = counter2 - STEP_2;
       changed = true;
       lastTriggerTime2 = now;
       Serial.print("Counter 2: ");
