@@ -1,50 +1,46 @@
 // Particle Counter with Nernst Equation Display
-// Arduino Uno R3
-// Two TM1637 4-digit displays + Two HC-SR04 ultrasonic sensors
+// Arduino Uno R3 — Tinkercad Compatible
+// 16x2 LCD display + Two HC-SR04 ultrasonic sensors
 //
-// Display 1: counter1 : counter2   (remaining particles)
-// Display 2: result1  : result2    (Nernst voltage)
+// Row 1: C1:xx    C2:xx   (remaining particles, counting down)
+// Row 2: N1:xx    N2:xx   (Nernst voltage results)
 
-#include <TM1637Display.h>
+#include <LiquidCrystal.h>
 #include <math.h>
 
 // --- Pin Configuration ---
 
-// TM1637 Display 1 (shows counters)
-const int DISP1_CLK = 2;
-const int DISP1_DIO = 3;
-
-// TM1637 Display 2 (shows Nernst results)
-const int DISP2_CLK = 4;
-const int DISP2_DIO = 5;
+// LCD pins (6 pins: RS, EN, D4–D7)
+const int LCD_RS = 2;
+const int LCD_EN = 3;
+const int LCD_D4 = 4;
+const int LCD_D5 = 5;
+const int LCD_D6 = 6;
+const int LCD_D7 = 7;
 
 // HC-SR04 Sensor 1
-const int TRIG_PIN1 = 6;
-const int ECHO_PIN1 = 7;
+const int TRIG_PIN1 = 8;
+const int ECHO_PIN1 = 9;
 
 // HC-SR04 Sensor 2
-const int TRIG_PIN2 = 8;
-const int ECHO_PIN2 = 9;
+const int TRIG_PIN2 = 10;
+const int ECHO_PIN2 = 11;
 
 // --- Sensor Configuration ---
 const int TARGET_DISTANCE_CM = 5;
 const int DISTANCE_TOLERANCE_CM = 1;
-const int DEBOUNCE_DELAY = 300; // ms to ignore repeated triggers
+const int DEBOUNCE_DELAY = 100; // ms to ignore repeated triggers
 
 // --- Counter Configuration ---
-const int START_VALUE = 99; // Initial particle count (tweak later per experiment)
+const int START_VALUE = 99; // Initial particle count (tweak per experiment)
 const int MIN_VALUE = 1;    // Floor to avoid division by zero
 
-// --- Nernst Constants (tweak later per particle type) ---
+// --- Nernst Constants (tweak per particle type) ---
 const float NERNST_NUMERATOR = 59.2; // 0.0592 V converted to mV
 const float LOG10_Q = 0.60206;       // log10(4), reaction quotient
 
-// --- Display Objects ---
-TM1637Display dispCounters(DISP1_CLK, DISP1_DIO);
-TM1637Display dispResults(DISP2_CLK, DISP2_DIO);
-
-// Colon bitmask for XX:XX format
-const uint8_t COLON_ON = 0b01000000;
+// --- LCD Object ---
+LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 // --- State ---
 int counter1 = START_VALUE;
@@ -81,7 +77,7 @@ int measureDistance(int trigPin, int echoPin)
 
 // Nernst equation: E = (0.0592 V / counter_mV) * log10(Q)
 // With mV conversion: (59.2 / counter) * log10(4)
-// Result clamped to 0–99 for 2-digit display
+// Result clamped to 0–99 for display
 int computeNernst(int counterVal)
 {
   float result = (NERNST_NUMERATOR / (float)counterVal) * LOG10_Q;
@@ -94,18 +90,36 @@ int computeNernst(int counterVal)
   return rounded;
 }
 
-// Update both TM1637 displays
-void updateDisplays()
+// Format a 2-digit number with leading zero (e.g. 5 → "05")
+void printPadded(int value)
 {
-  // Display 1: counter1:counter2
-  int counterDisplay = counter1 * 100 + counter2;
-  dispCounters.showNumberDecEx(counterDisplay, COLON_ON, true);
+  if (value < 10) lcd.print('0');
+  lcd.print(value);
+}
 
-  // Display 2: result1:result2
-  int result1 = computeNernst(counter1);
-  int result2 = computeNernst(counter2);
-  int resultDisplay = result1 * 100 + result2;
-  dispResults.showNumberDecEx(resultDisplay, COLON_ON, true);
+// Update the LCD with current counters and Nernst results
+void updateDisplay()
+{
+  int nernst1 = computeNernst(counter1);
+  int nernst2 = computeNernst(counter2);
+
+  // Row 1: counters
+  // Format: "C1:99    C2:99  "
+  lcd.setCursor(0, 0);
+  lcd.print("VNa:");
+  printPadded(counter1);
+  lcd.print("    ");
+  lcd.print("VK:");
+  printPadded(counter2);
+
+  // Row 2: Nernst results
+  // Format: "N1:00    N2:00  "
+  lcd.setCursor(0, 1);
+  lcd.print("Na:");
+  printPadded(nernst1);
+  lcd.print("    ");
+  lcd.print("K:");
+  printPadded(nernst2);
 }
 
 void setup()
@@ -116,9 +130,8 @@ void setup()
   pinMode(TRIG_PIN2, OUTPUT);
   pinMode(ECHO_PIN2, INPUT);
 
-  // Setup TM1637 displays (brightness 0–7)
-  dispCounters.setBrightness(5);
-  dispResults.setBrightness(5);
+  // Setup LCD (16 columns, 2 rows)
+  lcd.begin(16, 2);
 
   Serial.begin(9600);
   Serial.println("Particle Counter with Nernst Equation");
@@ -128,7 +141,7 @@ void setup()
   Serial.println(MIN_VALUE);
 
   // Show initial values
-  updateDisplays();
+  updateDisplay();
 }
 
 void loop()
@@ -156,7 +169,7 @@ void loop()
       lastTriggerTime1 = now;
       Serial.print("Counter 1: ");
       Serial.print(counter1);
-      Serial.print(" → Nernst: ");
+      Serial.print(" | Nernst: ");
       Serial.println(computeNernst(counter1));
     }
   }
@@ -172,15 +185,15 @@ void loop()
       lastTriggerTime2 = now;
       Serial.print("Counter 2: ");
       Serial.print(counter2);
-      Serial.print(" → Nernst: ");
+      Serial.print(" | Nernst: ");
       Serial.println(computeNernst(counter2));
     }
   }
   lastSensor2State = sensor2Triggered;
 
-  // Only refresh displays when a counter changes
+  // Only refresh LCD when a counter changes
   if (changed)
   {
-    updateDisplays();
+    updateDisplay();
   }
 }
