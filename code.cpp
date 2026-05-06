@@ -1,22 +1,19 @@
 // Particle Counter with Nernst Equation Display
-// Arduino Uno R3 — Tinkercad Compatible
-// 16x2 LCD display + Two HC-SR04 ultrasonic sensors
+// Arduino Uno R3
+// I2C 16x2 LCD display + Two HC-SR04 ultrasonic sensors
 //
 // Row 1: C1:xx    C2:xx   (remaining particles, counting down)
 // Row 2: N1:xx    N2:xx   (Nernst voltage results)
 
-#include <LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
 #include <math.h>
 
 // --- Pin Configuration ---
 
-// LCD pins (6 pins: RS, EN, D4–D7)
-const int LCD_RS = 2;
-const int LCD_EN = 3;
-const int LCD_D4 = 4;
-const int LCD_D5 = 5;
-const int LCD_D6 = 6;
-const int LCD_D7 = 7;
+// LCD I2C address (0x27 is the most common default for PCF8574 backpacks;
+// if nothing shows on screen, try 0x3F instead)
+const int LCD_I2C_ADDR = 0x27;
 
 // HC-SR04 Sensor 1
 const int TRIG_PIN1 = 8;
@@ -27,22 +24,16 @@ const int TRIG_PIN2 = 10;
 const int ECHO_PIN2 = 11;
 
 // --- Sensor Configuration ---
-const int TARGET_DISTANCE_CM = 20;
+const int TARGET_DISTANCE_CM = 5;
 const int DISTANCE_TOLERANCE_CM = 1;
-const int DEBOUNCE_DELAY = 100; // ms to ignore repeated triggers
+const int DEBOUNCE_DELAY = 30; // ms to ignore repeated triggers
 
 // --- Counter Configuration ---
 const int START_VALUE = 99; // Initial particle count (tweak per experiment)
-const int MIN_VALUE = 1;    // Floor to avoid division by zero
-const int STEP_1 = 6;
-const int STEP_2 = 9;
 
-// --- Nernst Constants (tweak per particle type) ---
-const float NERNST_NUMERATOR = 59.2; // 0.0592 V converted to mV
-const float LOG10_Q = 0.60206;       // log10(4), reaction quotient
-
-// --- LCD Object ---
-LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+// --- LCD Object (I2C) ---
+// SDA → A4, SCL → A5 on Arduino Uno (hardware I2C, no pin config needed)
+LiquidCrystal_I2C lcd(LCD_I2C_ADDR, 16, 2);
 
 // --- State ---
 int counter1 = START_VALUE;
@@ -56,40 +47,74 @@ unsigned long lastTriggerTime2 = 0;
 
 // --- Functions ---
 
-int measureDistance(int trigPin, int echoPin)
+// Trigger both HC-SR04 sensors and read echoes simultaneously.
+// Uses manual polling instead of blocking pulseIn() to read both in parallel.
+// Total time: ~3.2ms worst case (vs ~6ms sequential)
+void measureBothDistances(int &dist1, int &dist2)
 {
-  // Send 10µs trigger pulse
-  digitalWrite(trigPin, LOW);
+  // Trigger sensor 1
+  digitalWrite(TRIG_PIN1, LOW);
   delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
+  digitalWrite(TRIG_PIN1, HIGH);
   delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
+  digitalWrite(TRIG_PIN1, LOW);
 
-  // Read echo pulse (timeout 30 ms ≈ ~5 m max range)
-  unsigned long duration = pulseIn(echoPin, HIGH, 30000UL);
+  // Small gap to avoid ultrasonic crosstalk between sensors
+  delayMicroseconds(200);
 
-  if (duration == 0)
+  // Trigger sensor 2
+  digitalWrite(TRIG_PIN2, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN2, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN2, LOW);
+
+  // Poll both echo pins simultaneously
+  unsigned long startTime = micros();
+  const unsigned long TIMEOUT = 3000UL; // 3ms ≈ ~50 cm max range
+
+  unsigned long rise1 = 0, fall1 = 0;
+  unsigned long rise2 = 0, fall2 = 0;
+  bool echo1High = false, echo2High = false;
+  bool done1 = false, done2 = false;
+
+  while (micros() - startTime < TIMEOUT)
   {
-    return -1; // No echo received
+    unsigned long now = micros();
+
+    // Track echo pin 1 rising/falling edges
+    if (!done1)
+    {
+      if (digitalRead(ECHO_PIN1))
+      {
+        if (!echo1High) { rise1 = now; echo1High = true; }
+      }
+      else if (echo1High)
+      {
+        fall1 = now; done1 = true;
+      }
+    }
+
+    // Track echo pin 2 rising/falling edges
+    if (!done2)
+    {
+      if (digitalRead(ECHO_PIN2))
+      {
+        if (!echo2High) { rise2 = now; echo2High = true; }
+      }
+      else if (echo2High)
+      {
+        fall2 = now; done2 = true;
+      }
+    }
+
+    // Exit early if both echoes received
+    if (done1 && done2) break;
   }
 
-  // Round-trip: ~58 µs/cm
-  return (int)(duration / 58UL);
-}
-
-// Nernst equation: E = (0.0592 V / counter_mV) * log10(Q)
-// With mV conversion: (59.2 / counter) * log10(4)
-// Result clamped to 0–99 for display
-int computeNernst(int counterVal)
-{
-  float result = (NERNST_NUMERATOR / (float)counterVal) * LOG10_Q;
-  int rounded = (int)round(result);
-
-  // Clamp to displayable range
-  if (rounded < 0) rounded = 0;
-  if (rounded > 99) rounded = 99;
-
-  return rounded;
+  // Convert durations to cm (round-trip: ~58 µs/cm)
+  dist1 = done1 ? (int)((fall1 - rise1) / 58UL) : -1;
+  dist2 = done2 ? (int)((fall2 - rise2) / 58UL) : -1;
 }
 
 // Format a 2-digit number with leading zero (e.g. 5 → "05")
@@ -99,29 +124,30 @@ void printPadded(int value)
   lcd.print(value);
 }
 
-// Update the LCD with current counters and Nernst results
-void updateDisplay()
+// Partial LCD update: only rewrite the 2 digits for counter 1 and its Nernst result
+// Row 0 col 4–5 = counter1 digits, Row 1 col 3–4 = nernst1 digits
+void updateCounter1Display()
 {
-  int nernst1 = computeNernst(counter1);
-  int nernst2 = computeNernst(counter2);
-
-  // Row 1: counters
-  // Format: "C1:99    C2:99  "
-  lcd.setCursor(0, 0);
-  lcd.print("VNa:");
+  lcd.setCursor(4, 0);                          // "VNa:XX"
   printPadded(counter1);
-  lcd.print("    ");
-  lcd.print("VK:");
-  printPadded(counter2);
+  lcd.setCursor(3, 1);
+  if (counter1 < 99)                          // "Na:XX"
+    printPadded((35 + counter1 - 1) / counter1);
+  else
+    printPadded(0);  
+}
 
-  // Row 2: Nernst results
-  // Format: "N1:00    N2:00  "
-  lcd.setCursor(0, 1);
-  lcd.print("Na:");
-  printPadded(nernst1);
-  lcd.print("    ");
-  lcd.print("K:");
-  printPadded(nernst2);
+// Partial LCD update: only rewrite the 2 digits for counter 2 and its Nernst result
+// Row 0 col 13–14 = counter2 digits, Row 1 col 11–12 = nernst2 digits
+void updateCounter2Display()
+{
+  lcd.setCursor(12, 0);                         // "VK:XX"
+  printPadded(counter2);
+  lcd.setCursor(11, 1);
+  if (counter2 < 99)                          // "K:XX"
+    printPadded((35 + counter2 - 1) / counter2);
+  else
+    printPadded(0);  
 }
 
 void setup()
@@ -132,25 +158,30 @@ void setup()
   pinMode(TRIG_PIN2, OUTPUT);
   pinMode(ECHO_PIN2, INPUT);
 
-  // Setup LCD (16 columns, 2 rows)
-  lcd.begin(16, 2);
+  // Setup LCD (I2C)
+  lcd.init();
+  lcd.backlight();
+
+  // Paint static labels once (they never change)
+  // Row 0: "VNa:99    VK:99"
+  lcd.setCursor(0, 0);
+  lcd.print("VNa:     VK:");
+  // Row 1: "Na:00     K:00 "
+  lcd.setCursor(0, 1);
+  lcd.print("Na:      K:");
 
   Serial.begin(9600);
-  Serial.println("Particle Counter with Nernst Equation");
-  Serial.print("Start: ");
-  Serial.print(START_VALUE);
-  Serial.print(" | Min: ");
-  Serial.println(MIN_VALUE);
 
-  // Show initial values
-  updateDisplay();
+  // Show initial digit values
+  updateCounter1Display();
+  updateCounter2Display();
 }
 
 void loop()
 {
-  // Measure distances
-  int distance1 = measureDistance(TRIG_PIN1, ECHO_PIN1);
-  int distance2 = measureDistance(TRIG_PIN2, ECHO_PIN2);
+  // Measure both sensors simultaneously (interleaved)
+  int distance1, distance2;
+  measureBothDistances(distance1, distance2);
 
   // Check if object is within target range
   bool sensor1Triggered = (distance1 >= 0) &&
@@ -159,20 +190,15 @@ void loop()
                           (abs(distance2 - TARGET_DISTANCE_CM) <= DISTANCE_TOLERANCE_CM);
 
   unsigned long now = millis();
-  bool changed = false;
 
   // Sensor 1: rising edge + debounce → count down
   if (sensor1Triggered && !lastSensor1State && (now - lastTriggerTime1 > DEBOUNCE_DELAY))
   {
-    if (counter1 > MIN_VALUE)
+    if (counter1 > 9)
     {
-      counter1 = counter1 - STEP_1;
-      changed = true;
+      counter1 = counter1 - 9;
       lastTriggerTime1 = now;
-      Serial.print("Counter 1: ");
-      Serial.print(counter1);
-      Serial.print(" | Nernst: ");
-      Serial.println(computeNernst(counter1));
+      updateCounter1Display(); // Only refresh the 4 chars that changed
     }
   }
   lastSensor1State = sensor1Triggered;
@@ -180,22 +206,12 @@ void loop()
   // Sensor 2: rising edge + debounce → count down
   if (sensor2Triggered && !lastSensor2State && (now - lastTriggerTime2 > DEBOUNCE_DELAY))
   {
-    if (counter2 > MIN_VALUE)
+    if (counter2 > 6)
     {
-      counter2 = counter2 - STEP_2;
-      changed = true;
+      counter2 = counter2 - 6;
       lastTriggerTime2 = now;
-      Serial.print("Counter 2: ");
-      Serial.print(counter2);
-      Serial.print(" | Nernst: ");
-      Serial.println(computeNernst(counter2));
+      updateCounter2Display(); // Only refresh the 4 chars that changed
     }
   }
   lastSensor2State = sensor2Triggered;
-
-  // Only refresh LCD when a counter changes
-  if (changed)
-  {
-    updateDisplay();
-  }
 }
